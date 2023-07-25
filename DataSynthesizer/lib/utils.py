@@ -5,7 +5,7 @@ from string import ascii_lowercase
 import numpy as np
 from pandas import Series, DataFrame
 from sklearn.metrics import mutual_info_score, normalized_mutual_info_score
-
+from functools import reduce
 
 def set_random_seed(seed=0):
     random.seed(seed)
@@ -81,3 +81,19 @@ def display_bayesian_network(bn):
 
 def generate_random_string(length):
     return ''.join(np.random.choice(list(ascii_lowercase), size=length))
+
+def nested_dict_keys(d,path=''):
+  for key,val in d.items():
+    if isinstance(val, dict):
+      yield from nested_dict_keys(val,f'{key}.')
+    else:
+      yield path+key
+      
+def deep_get_from_dict(dictionary, keys, default=None):
+    return reduce(lambda d, key: d.get(key, default) if isinstance(d, dict) else default, keys.split("."), dictionary)
+
+def nested_set(dic, keys, value):
+    for key in keys[:-1]:
+        dic = dic.setdefault(key, {})
+    dic[keys[-1]] = value
+    

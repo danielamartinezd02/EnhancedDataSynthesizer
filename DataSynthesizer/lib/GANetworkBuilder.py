@@ -2,6 +2,7 @@ from DataSynthesizer.lib.utils import mutual_information
 
 import random
 import copy
+import time 
 
 class GANetworkBuilder:
 
@@ -14,8 +15,9 @@ class GANetworkBuilder:
         self.seed = seed
         self.sensi = sensi
         self.target = target
-
         self.fitness_map = {}
+        self.previous_genepool = None
+        self.best_individual = None
 
     def create_random_gene(self, df, n_cols):
         genome = []
@@ -68,11 +70,13 @@ class GANetworkBuilder:
 
     def calc_fitness(self, genome, df):
         fitness = 0
-
+        start = time.time()
         network = self.convert_to_network(genome, df)
         for (c, ps) in network:
             for p in ps:
                 fitness += self.get_mi(c, p, df)
+        end = time.time()
+        #print(f'Fitness time is  {end-start}')
         return fitness
 
 
@@ -166,6 +170,37 @@ class GANetworkBuilder:
             new_genepool.append(genome)
 
         return new_genepool
+    
+    def mutate_locally(self, evaluated_genepool, epoch, evaluated_genepool_received = []):
+
+        if epoch == 0:
+            evaluated_genepool = evaluated_genepool[:self.source_genes] + evaluated_genepool_received
+        else:
+            evaluated_genepool = evaluated_genepool[:self.source_genes]
+            
+        new_genepool = []
+           
+        for eg in evaluated_genepool:
+            new_genepool.append(eg[1])
+
+        while len(new_genepool) < self.genepool_size:
+            genome = copy.deepcopy(evaluated_genepool[random.randint(0, len(evaluated_genepool)-1)][1])
+
+            if not self.mutation_rate:
+                mr = 1/(len(genome)-1)
+            else:
+                mr = self.mutation_rate
+
+            if random.random() < mr:
+                genome_2 = copy.deepcopy(evaluated_genepool[random.randint(0, len(evaluated_genepool)-1)][1])
+                genome = self.crossover(genome, genome_2)
+
+            genome = self.flip(genome)
+            genome = self.swap(genome)
+
+            new_genepool.append(genome)
+
+        return new_genepool
 
 
     def convert_to_network(self, genome, df):
@@ -224,9 +259,38 @@ class GANetworkBuilder:
         for epoch in range(0,self.epochs):
             evaluated_genepool = self.eval_genepool(genepool, str_df)
             print("Epoch {}/{}".format(epoch+1, self.epochs))
-            #print(evaluated_genepool[0][0])
             print(evaluated_genepool[0])
             print("-----\n")
             genepool = self.mutate(evaluated_genepool)
 
         return self.convert_to_network(evaluated_genepool[0][1], str_df)
+
+    def ga_network_locally(self, df, federated_round, new_individuals=[]):
+            str_df = df.astype(str, copy=False)
+            if self.previous_genepool is None: 
+                genepool = self.create_random_genepool(str_df, self.genepool_size)
+            else:
+                genepool = self.previous_genepool
+
+            random.seed(self.seed)
+  
+            # Values in previous iterations should not be calculated again.
+            if federated_round == 0: 
+                for c in str_df.columns:
+                    self.fitness_map[c]={}
+                    for p in str_df.columns:
+                        self.fitness_map[c][p] = -1
+                        
+            evaluated_genepool_fl = self.eval_genepool(new_individuals, str_df)
+
+            for epoch in range(0,self.epochs):
+                evaluated_genepool = self.eval_genepool(genepool, str_df)
+                print(" Federated Round {} - Epoch {}/{}".format(federated_round, epoch+1, self.epochs))
+                print(evaluated_genepool[0])
+                print("-----\n")
+                genepool = self.mutate_locally(evaluated_genepool, epoch, evaluated_genepool_fl)
+            
+            self.previous_genepool = genepool  
+            self.best_individual= evaluated_genepool[0][1]
+            
+            return self.convert_to_network(evaluated_genepool[0][1], str_df)

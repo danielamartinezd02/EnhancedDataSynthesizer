@@ -62,6 +62,9 @@ class DataDescriber:
         self.attr_to_column: Dict[str, AbstractAttribute] = None
         self.bayesian_network: List = None
         self.df_encoded: DataFrame = None
+        
+        self.network_builder: GA = None
+        
 
     def describe_dataset_in_random_mode(self,
                                         dataset_file: str,
@@ -247,6 +250,61 @@ class DataDescriber:
 
         self.data_description['conditional_probabilities'] = construct_noisy_conditional_distributions(
             self.bayesian_network, self.df_encoded, epsilon / 2)
+        
+    def describe_dataset_in_independent_attribute_mode_locally(self,
+                                                       epsilon=0.1,
+                                                       seed=0):
+        """"Generate dataset description using independent attribute mode, but based on the global data description. """
+        
+        for column in self.attr_to_column.values():
+            column.infer_distribution()
+
+        self.inject_laplace_noise_into_distribution_per_attribute(epsilon)
+        # record attribute information in json format
+        self.data_description['attribute_description'] = {}
+        for attr, column in self.attr_to_column.items():
+            self.data_description['attribute_description'][attr] = column.to_json()
+            
+    def describe_dataset_in_correlated_attribute_mode_ga_locally(self,
+                                                      federated_round=0,
+                                                      individuals=[],
+                                                      k=0,
+                                                      epsilon=0.1,
+                                                      seed=0,
+                                                      source_genes=10,
+                                                      genepool_size=100,
+                                                      epochs=100,
+                                                      sensi=None,
+                                                      target=None):
+        """Generate dataset description using correlated attribute mode, but using a genetic algorithm to find the structure more efficiently
+
+        Parameters
+        ----------
+        federated_round: int
+            Number representing the round in the federated learning training. 
+        k : int
+            Maximum number of parents in Bayesian network.
+        epsilon : float
+            A parameter in Differential Privacy. Increase epsilon value to reduce the injected noises. Set epsilon=0 to turn
+            off Differential Privacy.
+        seed : int or float
+            Seed the random number generator.
+            :param epochs:
+            :param target:
+            :param sensi:
+        """
+        if federated_round == 0: 
+            self.df_encoded = self.encode_dataset_into_binning_indices()
+            if self.df_encoded.shape[1] < 2:
+                raise Exception("Correlated Attribute Mode requires at least 2 attributes(i.e., columns) in dataset.")
+            self.ga_network_builder = GANetworkBuilder(k,source_genes=source_genes,genepool_size=genepool_size,epochs=epochs,seed=seed, sensi=sensi,target=target)
+        
+        self.bayesian_network = self.ga_network_builder.ga_network_locally(self.df_encoded, federated_round, individuals)[1:]
+    
+        
+        # print(self.bayesian_network)
+
+            
 
     def read_dataset_from_csv(self, file_name=None):
         try:
